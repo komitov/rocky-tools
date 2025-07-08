@@ -1,6 +1,6 @@
 #!/bin/bash
 # 
-# migrate2rocky9 - Migrate another EL8 distribution to RockyLinux 9.
+# migrate2rocky9 - Migrate another EL9 distribution to RockyLinux 9.
 # By: Peter Ajamian <peter@pajamian.dhs.org>
 # Adapted from centos2rocky.sh by label <label@rockylinux.org>
 #
@@ -273,6 +273,12 @@ pre_check () {
 'migrate2rocky9. See the README file for details.'
     fi
 
+    if fips-mode-setup --is-enabled; then
+      exit_message \
+'Migration from a system that has FIPS mode enabled is not supported by '\
+'migrate2rocky9. Please disable FIPS mode before running migrate2rocky9.'
+    fi
+
     dnf -y check || exit_message \
 'Errors found in dnf/rpm database.  Please correct before running '\
 'migrate2rocky9.'
@@ -290,7 +296,7 @@ pre_check () {
 	    continue
 	fi
 
-	dir=${dirs[$((i++))]}
+	dir=${dirs[i++]}
 
 	mount_avail_map[$mount]=${avail%M}
 	(( mount_space_map[$mount]+=dir_space_map[$dir] ))
@@ -326,6 +332,7 @@ bin_check() {
     bins=(
         rpm dnf awk column tee tput mkdir cat arch sort uniq rmdir df
         rm head curl sha512sum mktemp systemd-detect-virt sed grep
+        fips-mode-setup
     )
     if [[ $update_efi ]]; then
         bins+=(findmnt grub2-mkconfig efibootmgr mokutil lsblk)
@@ -718,12 +725,16 @@ collect_system_info () {
         redhat-release
         redhat-release-eula
     )
+    addl_pkg_removes=(
+      openssl-fips-provider
+      openssl-fips-provider-so
+    )
 
     # Check to make sure that we don't already have a full or partial
     # RockyLinux install.
     if [[ $(rpm -qa "${!provides_pkg_map[@]}") ]]; then
         exit_message \
-$'Found a full or partial RockyLinux install already in place.  Aborting\n'
+$'Found a full or partial RockyLinux install already in place.  Aborting\n'\
 $'because continuing with the migration could cause further damage to system.'
     fi
 
@@ -839,14 +850,14 @@ $'because continuing with the migration could cause further damage to system.'
     disable_modules=()
     local i gl repl mod
     for i in "${!enabled_modules[@]}"; do
-        mod=${enabled_modules[$i]}
+        mod=${enabled_modules[i]}
         for gl in "${!module_glob_map[@]}"; do
             repl=${module_glob_map[$gl]}
             mod=${mod/$gl/$repl}
         done
-        if [[ $mod != "${enabled_modules[$i]}" ]]; then
-            disable_modules+=("${enabled_modules[$i]}")
-            enabled_modules[$i]=$mod
+        if [[ $mod != "${enabled_modules[i]}" ]]; then
+            disable_modules+=("${enabled_modules[i]}")
+            enabled_modules[i]=$mod
         fi
     done
 
@@ -1100,7 +1111,8 @@ EOF
     fi
 
     infomsg $'\nSyncing packages\n\n'
-    dnf -y distro-sync || exit_message "Error during distro-sync."
+    dnf -y --allowerasing distro-sync ||
+        exit_message "Error during distro-sync."
 
     # Disable Stream repos.
     if (( ${#installed_sys_stream_repos_pkgs[@]} ||
@@ -1219,7 +1231,7 @@ fix_efi () (
     grub2-mkconfig -o /boot/efi/EFI/rocky/grub.cfg ||
             exit_message "Error updating the grub config."
     for i in "${!efi_disk[@]}"; do
-        efibootmgr -c -d "/dev/${efi_disk[$i]}" -p "${efi_partition[$i]}" \
+        efibootmgr -c -d "/dev/${efi_disk[i]}" -p "${efi_partition[i]}" \
             -L "Rocky Linux" -l "/EFI/rocky/shim${cpu_arch_suffix_map[$ARCH]}.efi" ||
             exit_message "Error updating uEFI firmware."
     done
